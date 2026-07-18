@@ -106,6 +106,10 @@ class MainMenu: NSMenu {
         menu.addItem(withTitle: tr("macMenuEditTunnel"), action: #selector(TunnelDetailTableViewController.handleEditTunnelAction), keyEquivalent:"e")
         menu.addItem(withTitle: tr("macMenuDeleteSelected"), action: #selector(TunnelsListTableViewController.handleRemoveTunnelAction), keyEquivalent: "")
 
+        menu.addItem(NSMenuItem.separator())
+
+        menu.addItem(withTitle: tr("macMenuSplitTunneling"), action: #selector(AppDelegate.splitTunnelingClicked), keyEquivalent:"")
+
         return menu
     }
 

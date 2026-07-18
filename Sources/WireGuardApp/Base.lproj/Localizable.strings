@@ -331,10 +331,22 @@
 "macMenuToggleStatus" = "Toggle Status";
 "macMenuEditTunnel" = "Edit…";
 "macMenuDeleteSelected" = "Delete Selected";
+"macMenuSplitTunneling" = "Split Tunneling…";
 
 "macMenuWindow" = "Window";
 "macMenuMinimize" = "Minimize";
 "macMenuZoom" = "Zoom";
+
+// Mac split tunneling window
+
+"macWindowTitleSplitTunneling" = "Split Tunneling";
+"macSplitTunnelingHeader" = "Apps that bypass the tunnel";
+"macSplitTunnelingInfo" = "Traffic from checked apps goes directly to your network, outside the active WireGuard tunnel. Changes apply immediately and no tunnel configuration is modified.";
+"macSplitTunnelingAddApp" = "Add Application…";
+"macSplitTunnelingAppNotRunning" = "Not running";
+"macSplitTunnelingStatusNoApps" = "No apps are bypassing the tunnel.";
+"macSplitTunnelingStatusActive (%d)" = "%d app(s) bypassing the active tunnel.";
+"macSplitTunnelingStatusInactive" = "Checked apps will bypass the tunnel once one is active.";
 
 // Mac manage tunnels window
 

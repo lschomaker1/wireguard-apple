@@ -5,6 +5,7 @@ import Cocoa
 
 protocol StatusMenuWindowDelegate: AnyObject {
     func showManageTunnelsWindow(completion: ((NSWindow?) -> Void)?)
+    func showSplitTunnelingWindow()
 }
 
 class StatusMenu: NSMenu {
@@ -125,6 +126,9 @@ class StatusMenu: NSMenu {
         let importItem = NSMenuItem(title: tr("macMenuImportTunnels"), action: #selector(importTunnelsClicked), keyEquivalent: "")
         importItem.target = self
         addItem(importItem)
+        let splitTunnelingItem = NSMenuItem(title: tr("macMenuSplitTunneling"), action: #selector(splitTunnelingClicked), keyEquivalent: "")
+        splitTunnelingItem.target = self
+        addItem(splitTunnelingItem)
     }
 
     func addApplicationItems() {
@@ -163,6 +167,10 @@ class StatusMenu: NSMenu {
 
     @objc func manageTunnelsClicked() {
         windowDelegate?.showManageTunnelsWindow(completion: nil)
+    }
+
+    @objc func splitTunnelingClicked() {
+        windowDelegate?.showSplitTunnelingWindow()
     }
 
     @objc func importTunnelsClicked() {

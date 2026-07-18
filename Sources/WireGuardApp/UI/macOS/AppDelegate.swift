@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     var manageTunnelsRootVC: ManageTunnelsRootViewController?
     var manageTunnelsWindowObject: NSWindow?
+    var splitTunnelingWindowObject: NSWindow?
     var onAppDeactivation: (() -> Void)?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -188,6 +189,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate {
+    @objc func splitTunnelingClicked() {
+        showSplitTunnelingWindow()
+    }
+
     @objc func aboutClicked() {
         var appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
         if let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
@@ -224,6 +229,19 @@ extension AppDelegate: StatusMenuWindowDelegate {
         setDockIconAndMainMenuVisibility(isVisible: true) { [weak manageTunnelsWindowObject] in
             manageTunnelsWindowObject?.makeKeyAndOrderFront(self)
             completion?(manageTunnelsWindowObject)
+        }
+    }
+
+    func showSplitTunnelingWindow() {
+        if splitTunnelingWindowObject == nil {
+            let window = NSWindow(contentViewController: SplitTunnelingViewController())
+            window.title = tr("macWindowTitleSplitTunneling")
+            window.setContentSize(NSSize(width: 480, height: 560))
+            window.setFrameAutosaveName(NSWindow.FrameAutosaveName("SplitTunnelingWindow")) // Auto-save window position and size
+            splitTunnelingWindowObject = window
+        }
+        setDockIconAndMainMenuVisibility(isVisible: true) { [weak splitTunnelingWindowObject] in
+            splitTunnelingWindowObject?.makeKeyAndOrderFront(self)
         }
     }
 }

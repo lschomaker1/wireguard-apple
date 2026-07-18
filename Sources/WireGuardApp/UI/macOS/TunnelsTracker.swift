@@ -43,6 +43,8 @@ class TunnelsTracker {
 
         tunnelsManager.tunnelsListDelegate = self
         tunnelsManager.activationDelegate = self
+
+        updateSplitTunnelState()
     }
 
     func observeStatus(of tunnel: TunnelContainer) -> AnyObject {
@@ -55,7 +57,21 @@ class TunnelsTracker {
             } else {
                 self.currentTunnel = tunnel
             }
+            self.updateSplitTunnelState()
         }
+    }
+
+    private func updateSplitTunnelState() {
+        var isAnyTunnelActive = false
+        for index in 0 ..< tunnelsManager.numberOfTunnels() {
+            switch tunnelsManager.tunnel(at: index).status {
+            case .active, .activating, .reasserting, .restarting:
+                isAnyTunnelActive = true
+            default:
+                break
+            }
+        }
+        SplitTunnelManager.shared.tunnelsStateChanged(anyTunnelActive: isAnyTunnelActive)
     }
 }
 
@@ -89,6 +105,7 @@ extension TunnelsTracker: TunnelsManagerListDelegate {
 
         statusMenu?.removeTunnelMenuItem(at: index)
         manageTunnelsRootVC?.tunnelsListVC?.tunnelRemoved(at: index)
+        updateSplitTunnelState()
     }
 }
 

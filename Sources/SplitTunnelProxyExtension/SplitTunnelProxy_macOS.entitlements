@@ -4,7 +4,6 @@
 <dict>
 	<key>com.apple.developer.networking.networkextension</key>
 	<array>
-		<string>packet-tunnel-provider</string>
 		<string>app-proxy-provider</string>
 	</array>
 	<key>com.apple.security.app-sandbox</key>
@@ -13,7 +12,9 @@
 	<array>
 		<string>$(DEVELOPMENT_TEAM).group.$(APP_ID_MACOS)</string>
 	</array>
-	<key>com.apple.security.files.user-selected.read-write</key>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
 	<true/>
 </dict>
 </plist>
