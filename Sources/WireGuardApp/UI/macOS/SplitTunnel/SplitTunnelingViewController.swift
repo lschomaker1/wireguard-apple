@@ -132,8 +132,22 @@ class SplitTunnelingViewController: NSViewController {
     }
 
     private func reloadItems() {
+        // Backfill code-signing teams for apps saved before team matching existed,
+        // so existing selections gain whole-vendor coverage without re-adding.
+        var excludedApps = SplitTunnelManager.shared.excludedApps
+        var didBackfill = false
+        for index in excludedApps.indices where (excludedApps[index].teamIdentifier ?? "").isEmpty {
+            if let team = CodeSigning.teamIdentifier(forBundleAt: excludedApps[index].bundlePath) {
+                excludedApps[index].teamIdentifier = team
+                didBackfill = true
+            }
+        }
+        if didBackfill {
+            SplitTunnelManager.shared.setExcludedApps(excludedApps)
+        }
+
         var itemsByKey = [String: AppListItem]()
-        for app in SplitTunnelManager.shared.excludedApps {
+        for app in excludedApps {
             let key = app.bundleIdentifier.isEmpty ? app.bundlePath : app.bundleIdentifier
             itemsByKey[key] = AppListItem(app: app, isExcluded: true, isRunning: false)
         }
@@ -146,9 +160,11 @@ class SplitTunnelingViewController: NSViewController {
                 existingItem.isRunning = true
                 itemsByKey[bundleIdentifier] = existingItem
             } else {
+                let bundlePath = runningApp.bundleURL?.path ?? ""
                 let app = SplitTunnelApp(bundleIdentifier: bundleIdentifier,
                                          name: runningApp.localizedName ?? bundleIdentifier,
-                                         bundlePath: runningApp.bundleURL?.path ?? "")
+                                         bundlePath: bundlePath,
+                                         teamIdentifier: CodeSigning.teamIdentifier(forBundleAt: bundlePath))
                 itemsByKey[bundleIdentifier] = AppListItem(app: app, isExcluded: false, isRunning: true)
             }
         }
@@ -199,7 +215,8 @@ class SplitTunnelingViewController: NSViewController {
                     ?? url.deletingPathExtension().lastPathComponent
                 let app = SplitTunnelApp(bundleIdentifier: bundle.bundleIdentifier ?? "",
                                          name: name,
-                                         bundlePath: url.path)
+                                         bundlePath: url.path,
+                                         teamIdentifier: CodeSigning.teamIdentifier(forBundleAt: url.path))
                 let isAlreadyExcluded = excludedApps.contains { existing in
                     if !existing.bundleIdentifier.isEmpty && !app.bundleIdentifier.isEmpty {
                         return existing.bundleIdentifier == app.bundleIdentifier

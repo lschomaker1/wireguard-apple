@@ -102,13 +102,26 @@ private final class ExcludedAppMatcher {
     private let lock = NSLock()
     private var bundleIdentifiers = [String]()
     private var bundlePaths = [String]()
+    private var teamIdentifiers = Set<String>()
 
     @discardableResult
     func reload() -> Int {
         let apps = SplitTunnelConfiguration.loadExcludedApps()
+        // Derive the code-signing team from the bundle path for any app the UI
+        // didn't record one for, so existing selections get whole-vendor
+        // matching without the user re-adding them.
+        var teams = Set<String>()
+        for app in apps {
+            if let team = app.teamIdentifier, !team.isEmpty {
+                teams.insert(team)
+            } else if let team = CodeSigning.teamIdentifier(forBundleAt: app.bundlePath) {
+                teams.insert(team)
+            }
+        }
         lock.lock()
         bundleIdentifiers = apps.map { $0.bundleIdentifier }.filter { !$0.isEmpty }
         bundlePaths = apps.map { $0.bundlePath }.filter { !$0.isEmpty }.map { $0.hasSuffix("/") ? $0 : $0 + "/" }
+        teamIdentifiers = teams
         lock.unlock()
         return apps.count
     }
@@ -117,9 +130,18 @@ private final class ExcludedAppMatcher {
         lock.lock()
         let identifiers = bundleIdentifiers
         let paths = bundlePaths
+        let teams = teamIdentifiers
         lock.unlock()
 
-        guard !identifiers.isEmpty || !paths.isEmpty else { return false }
+        guard !identifiers.isEmpty || !paths.isEmpty || !teams.isEmpty else { return false }
+
+        // Primary, most robust check: the code-signing team. Every process a
+        // vendor ships shares its team, so excluding one app of a multi-process
+        // suite (a game's launcher, client, and background service) excludes the
+        // whole family regardless of bundle id or path.
+        if !teams.isEmpty, let team = CodeSigning.teamIdentifier(forAuditToken: flow.metaData.sourceAppAuditToken), teams.contains(team) {
+            return true
+        }
 
         // Match both the app itself and its helper processes: helpers either
         // extend the app's signing identifier (com.example.app.helper) or live

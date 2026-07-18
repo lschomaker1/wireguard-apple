@@ -310,15 +310,16 @@ final class PhysicalInterfaceMonitor {
 }
 
 enum EndpointClassifier {
-    // Multicast, broadcast and link-local destinations cannot be usefully
-    // relayed through a bound connection; those flows stay on the normal path.
+    // Loopback, multicast, broadcast and link-local destinations cannot be
+    // usefully relayed through a physical-interface-bound connection; those
+    // flows stay on the normal path so local and LAN traffic keeps working.
     static func isRelayable(host: String) -> Bool {
         guard !host.isEmpty else { return false }
         if let v4 = IPv4Address(host) {
-            return !(v4.isMulticast || v4 == IPv4Address.broadcast || v4.isLinkLocal)
+            return !(v4.isLoopback || v4.isMulticast || v4 == IPv4Address.broadcast || v4.isLinkLocal)
         }
         if let v6 = IPv6Address(host) {
-            return !(v6.isMulticast || v6.isLinkLocal)
+            return !(v6.isLoopback || v6.isMulticast || v6.isLinkLocal)
         }
         return true
     }
