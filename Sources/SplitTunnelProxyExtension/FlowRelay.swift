@@ -27,9 +27,16 @@ class FlowRelay: Hashable {
         onFinish?(self)
     }
 
-    fileprivate static func connectionParameters(_ parameters: NWParameters) -> NWParameters {
-        // Keeping utun interfaces off-limits is what makes the relayed traffic
-        // bypass the tunnel's default route.
+    fileprivate static func connectionParameters(_ parameters: NWParameters, boundTo boundInterface: NWInterface?) -> NWParameters {
+        // A full-tunnel WireGuard config owns the default route, so merely
+        // prohibiting the utun interface leaves a relayed connection with no
+        // usable path ("Network is down"). Positively binding to the physical
+        // interface is what actually carries the traffic around the tunnel.
+        if let boundInterface = boundInterface {
+            parameters.requiredInterface = boundInterface
+        } else {
+            parameters.requiredInterfaceType = .wifi
+        }
         parameters.prohibitedInterfaceTypes = [.other]
         parameters.preferNoProxies = true
         return parameters
@@ -50,10 +57,10 @@ final class TCPFlowRelay: FlowRelay {
     private var flowEOF = false
     private var connectionEOF = false
 
-    init?(flow: NEAppProxyTCPFlow, remote: NWHostEndpoint) {
+    init?(flow: NEAppProxyTCPFlow, remote: NWHostEndpoint, boundInterface: NWInterface?) {
         guard let port = NWEndpoint.Port(remote.port) else { return nil }
         self.flow = flow
-        connection = NWConnection(host: NWEndpoint.Host(remote.hostname), port: port, using: FlowRelay.connectionParameters(.tcp))
+        connection = NWConnection(host: NWEndpoint.Host(remote.hostname), port: port, using: FlowRelay.connectionParameters(.tcp, boundTo: boundInterface))
         super.init(label: "SplitTunnelProxy.tcp")
     }
 
@@ -176,10 +183,12 @@ final class UDPFlowRelay: FlowRelay {
     private static let maxConnections = 128
 
     private let flow: NEAppProxyUDPFlow
+    private let boundInterface: NWInterface?
     private var connections = [String: NWConnection]()
 
-    init(flow: NEAppProxyUDPFlow) {
+    init(flow: NEAppProxyUDPFlow, boundInterface: NWInterface?) {
         self.flow = flow
+        self.boundInterface = boundInterface
         super.init(label: "SplitTunnelProxy.udp")
     }
 
@@ -227,7 +236,7 @@ final class UDPFlowRelay: FlowRelay {
             return existing
         }
         guard connections.count < UDPFlowRelay.maxConnections, let port = NWEndpoint.Port(endpoint.port) else { return nil }
-        let connection = NWConnection(host: NWEndpoint.Host(endpoint.hostname), port: port, using: FlowRelay.connectionParameters(.udp))
+        let connection = NWConnection(host: NWEndpoint.Host(endpoint.hostname), port: port, using: FlowRelay.connectionParameters(.udp, boundTo: boundInterface))
         connections[key] = connection
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self = self, let connection = connection else { return }
@@ -268,6 +277,35 @@ final class UDPFlowRelay: FlowRelay {
         }
         connections.removeAll()
         markFinished()
+    }
+}
+
+// Tracks the physical (non-tunnel) interface that relayed connections bind to,
+// updating as the machine moves between Wi-Fi and Ethernet.
+final class PhysicalInterfaceMonitor {
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "SplitTunnelProxy.pathMonitor")
+    private let lock = NSLock()
+    private var interface: NWInterface?
+
+    func start() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let physical = path.availableInterfaces.first { $0.type == .wifi || $0.type == .wiredEthernet }
+            self?.lock.lock()
+            self?.interface = physical
+            self?.lock.unlock()
+        }
+        monitor.start(queue: queue)
+    }
+
+    func stop() {
+        monitor.cancel()
+    }
+
+    var current: NWInterface? {
+        lock.lock()
+        defer { lock.unlock() }
+        return interface
     }
 }
 

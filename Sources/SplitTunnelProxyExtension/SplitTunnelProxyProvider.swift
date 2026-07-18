@@ -4,15 +4,21 @@
 import Foundation
 import Network
 import NetworkExtension
+import os.log
+
+let proxyLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "SplitTunnelProxy", category: "provider")
 
 class SplitTunnelProxyProvider: NETransparentProxyProvider {
 
     private let matcher = ExcludedAppMatcher()
+    private let interfaceMonitor = PhysicalInterfaceMonitor()
     private let relayQueue = DispatchQueue(label: "SplitTunnelProxyProvider.relays")
     private var relays = Set<FlowRelay>()
 
     override func startProxy(options: [String: Any]? = nil, completionHandler: @escaping (Error?) -> Void) {
-        matcher.reload()
+        let excludedCount = matcher.reload()
+        interfaceMonitor.start()
+        proxyLog.info("Starting proxy with \(excludedCount) excluded app(s)")
 
         let settings = NETransparentProxyNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         settings.includedNetworkRules = [
@@ -20,18 +26,28 @@ class SplitTunnelProxyProvider: NETransparentProxyProvider {
             NENetworkRule(remoteNetwork: nil, remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .UDP, direction: .outbound)
         ]
         // DNS stays on the system resolver path, which the packet tunnel already
-        // points at the tunnel's DNS servers while it is up.
+        // points at the tunnel's DNS servers while it is up. Port rules must name
+        // TCP or UDP explicitly; a protocol of .any would ignore the port and
+        // swallow every flow.
         settings.excludedNetworkRules = [
-            NENetworkRule(remoteNetwork: NWHostEndpoint(hostname: "0.0.0.0", port: "53"), remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .any, direction: .outbound),
-            NENetworkRule(remoteNetwork: NWHostEndpoint(hostname: "::", port: "53"), remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .any, direction: .outbound)
+            NENetworkRule(remoteNetwork: NWHostEndpoint(hostname: "0.0.0.0", port: "53"), remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .TCP, direction: .outbound),
+            NENetworkRule(remoteNetwork: NWHostEndpoint(hostname: "0.0.0.0", port: "53"), remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .UDP, direction: .outbound),
+            NENetworkRule(remoteNetwork: NWHostEndpoint(hostname: "::", port: "53"), remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .TCP, direction: .outbound),
+            NENetworkRule(remoteNetwork: NWHostEndpoint(hostname: "::", port: "53"), remotePrefix: 0, localNetwork: nil, localPrefix: 0, protocol: .UDP, direction: .outbound)
         ]
 
         setTunnelNetworkSettings(settings) { error in
+            if let error = error {
+                proxyLog.error("Proxy settings rejected: \(error.localizedDescription, privacy: .public)")
+            } else {
+                proxyLog.info("Proxy settings applied")
+            }
             completionHandler(error)
         }
     }
 
     override func stopProxy(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+        interfaceMonitor.stop()
         relayQueue.sync {
             for relay in relays {
                 relay.cancel()
@@ -43,7 +59,8 @@ class SplitTunnelProxyProvider: NETransparentProxyProvider {
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
         if String(data: messageData, encoding: .utf8) == SplitTunnelConfiguration.providerReloadMessage {
-            matcher.reload()
+            let excludedCount = matcher.reload()
+            proxyLog.info("Reloaded exclusions: \(excludedCount) app(s)")
         }
         completionHandler?(nil)
     }
@@ -51,14 +68,18 @@ class SplitTunnelProxyProvider: NETransparentProxyProvider {
     override func handleNewFlow(_ flow: NEAppProxyFlow) -> Bool {
         guard matcher.matches(flow: flow) else { return false }
 
+        let boundInterface = interfaceMonitor.current
         let relay: FlowRelay
         if let tcpFlow = flow as? NEAppProxyTCPFlow {
             guard let remote = tcpFlow.remoteEndpoint as? NWHostEndpoint,
+                  remote.port != "53",
                   EndpointClassifier.isRelayable(host: remote.hostname),
-                  let tcpRelay = TCPFlowRelay(flow: tcpFlow, remote: remote) else { return false }
+                  let tcpRelay = TCPFlowRelay(flow: tcpFlow, remote: remote, boundInterface: boundInterface) else { return false }
+            proxyLog.info("Bypassing TCP flow from \(flow.metaData.sourceAppSigningIdentifier, privacy: .public) to \(remote.hostname, privacy: .public):\(remote.port, privacy: .public) via \(boundInterface?.name ?? "auto", privacy: .public)")
             relay = tcpRelay
         } else if let udpFlow = flow as? NEAppProxyUDPFlow {
-            relay = UDPFlowRelay(flow: udpFlow)
+            proxyLog.info("Bypassing UDP flow from \(flow.metaData.sourceAppSigningIdentifier, privacy: .public)")
+            relay = UDPFlowRelay(flow: udpFlow, boundInterface: boundInterface)
         } else {
             return false
         }
@@ -82,12 +103,14 @@ private final class ExcludedAppMatcher {
     private var bundleIdentifiers = [String]()
     private var bundlePaths = [String]()
 
-    func reload() {
+    @discardableResult
+    func reload() -> Int {
         let apps = SplitTunnelConfiguration.loadExcludedApps()
         lock.lock()
         bundleIdentifiers = apps.map { $0.bundleIdentifier }.filter { !$0.isEmpty }
         bundlePaths = apps.map { $0.bundlePath }.filter { !$0.isEmpty }.map { $0.hasSuffix("/") ? $0 : $0 + "/" }
         lock.unlock()
+        return apps.count
     }
 
     func matches(flow: NEAppProxyFlow) -> Bool {
@@ -107,20 +130,42 @@ private final class ExcludedAppMatcher {
                 return true
             }
         }
-        if !paths.isEmpty, let processPath = Self.processPath(auditToken: flow.metaData.sourceAppAuditToken) {
-            for path in paths where processPath.hasPrefix(path) {
-                return true
+        if !paths.isEmpty, var pid = Self.pid(fromAuditToken: flow.metaData.sourceAppAuditToken) {
+            // Walk up the process tree so that children spawned by an excluded
+            // app (a shell in a terminal, a game launched by its client) are
+            // excluded along with it.
+            var depth = 0
+            while pid > 1 && depth < 16 {
+                if let processPath = Self.path(ofPid: pid) {
+                    for path in paths where processPath == String(path.dropLast()) || processPath.hasPrefix(path) {
+                        return true
+                    }
+                }
+                guard let parent = Self.parentPid(of: pid), parent != pid else { break }
+                pid = parent
+                depth += 1
             }
         }
         return false
     }
 
-    private static func processPath(auditToken: Data?) -> String? {
+    private static func pid(fromAuditToken auditToken: Data?) -> pid_t? {
         // audit_token_t is eight 32-bit values; the sixth one is the pid.
         guard let auditToken = auditToken, auditToken.count >= 8 * MemoryLayout<UInt32>.size else { return nil }
-        let pid = auditToken.withUnsafeBytes { $0.load(fromByteOffset: 5 * MemoryLayout<UInt32>.size, as: pid_t.self) }
+        return auditToken.withUnsafeBytes { $0.load(fromByteOffset: 5 * MemoryLayout<UInt32>.size, as: pid_t.self) }
+    }
+
+    private static func path(ofPid pid: pid_t) -> String? {
         var buffer = [CChar](repeating: 0, count: 4 * 1024)
         guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
         return String(cString: buffer)
+    }
+
+    private static func parentPid(of pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info.kp_eproc.e_ppid
     }
 }
