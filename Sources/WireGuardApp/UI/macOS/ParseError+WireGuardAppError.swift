@@ -27,6 +27,8 @@ extension TunnelConfiguration.ParseError: WireGuardAppError {
             return (tr(format: "macAlertDNSInvalid (%@)", value), tr("alertInvalidInterfaceMessageDNSInvalid"))
         case .interfaceHasInvalidMTU(let value):
             return (tr(format: "macAlertMTUInvalid (%@)", value), tr("alertInvalidInterfaceMessageMTUInvalid"))
+        case .interfaceHasInvalidObfuscation(let value):
+            return (tr(format: "macAlertObfuscationInvalid (%@)", value), tr("alertInvalidInterfaceMessageObfuscationInvalid"))
         case .interfaceHasUnrecognizedKey(let value):
             return (tr(format: "macAlertUnrecognizedInterfaceKey (%@)", value), tr("macAlertInfoUnrecognizedInterfaceKey"))
         case .peerHasNoPublicKey:

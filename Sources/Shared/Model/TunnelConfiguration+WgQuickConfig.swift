@@ -21,6 +21,7 @@ extension TunnelConfiguration {
         case interfaceHasInvalidAddress(String)
         case interfaceHasInvalidDNS(String)
         case interfaceHasInvalidMTU(String)
+        case interfaceHasInvalidObfuscation(String)
         case interfaceHasUnrecognizedKey(String)
         case peerHasNoPublicKey
         case peerHasInvalidPublicKey(String)
@@ -71,7 +72,7 @@ extension TunnelConfiguration {
                     } else {
                         attributes[key] = value
                     }
-                    let interfaceSectionKeys: Set<String> = ["privatekey", "listenport", "address", "dns", "mtu"]
+                    let interfaceSectionKeys: Set<String> = ["privatekey", "listenport", "address", "dns", "mtu", "obfuscation"]
                     let peerSectionKeys: Set<String> = ["publickey", "presharedkey", "allowedips", "endpoint", "persistentkeepalive"]
                     if parserState == .inInterfaceSection {
                         guard interfaceSectionKeys.contains(key) else {
@@ -142,6 +143,9 @@ extension TunnelConfiguration {
         if let mtu = interface.mtu {
             output.append("MTU = \(mtu)\n")
         }
+        if let obfuscation = interface.obfuscation {
+            output.append("Obfuscation = \(obfuscation.stringRepresentation)\n")
+        }
 
         for peer in peers {
             output.append("\n[Peer]\n")
@@ -206,6 +210,12 @@ extension TunnelConfiguration {
                 throw ParseError.interfaceHasInvalidMTU(mtuString)
             }
             interface.mtu = mtu
+        }
+        if let obfuscationString = attributes["obfuscation"] {
+            guard let obfuscation = Obfuscation(stringRepresentation: obfuscationString) else {
+                throw ParseError.interfaceHasInvalidObfuscation(obfuscationString)
+            }
+            interface.obfuscation = obfuscation
         }
         return interface
     }

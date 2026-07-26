@@ -176,6 +176,7 @@
 "alertInvalidInterfaceMessageAddressInvalid" = "Interface addresses must be a list of comma-separated IP addresses, optionally in CIDR notation";
 "alertInvalidInterfaceMessageListenPortInvalid" = "Interface’s listen port must be between 0 and 65535, or unspecified";
 "alertInvalidInterfaceMessageMTUInvalid" = "Interface’s MTU must be between 576 and 65535, or unspecified";
+"alertInvalidInterfaceMessageObfuscationInvalid" = "Interface’s Obfuscation must be ‘udp2tcp’ or ‘udp2tcp:<port>’, or unspecified";
 "alertInvalidInterfaceMessageDNSInvalid" = "Interface’s DNS servers must be a list of comma-separated IP addresses";
 
 /* Alert title for error in the peer data */
@@ -264,6 +265,7 @@
 "alertTunnelActivationBackendFailureMessage" = "Unable to turn on Go backend library.";
 "alertTunnelActivationFileDescriptorFailureMessage" = "Unable to determine TUN device file descriptor.";
 "alertTunnelActivationSetNetworkSettingsMessage" = "Unable to apply network settings to tunnel object.";
+"alertTunnelActivationObfuscationFailureMessage" = "Activation failed because the obfuscation proxy could not start. Check the Obfuscation setting in the tunnel configuration.";
 
 "alertTunnelDNSFailureTitle" = "DNS resolution failure";
 "alertTunnelDNSFailureMessage" = "One or more endpoint domains could not be resolved.";
@@ -399,6 +401,7 @@
 "macAlertAddressInvalid (%@)" = "Address ‘%@’ is invalid.";
 "macAlertDNSInvalid (%@)" = "DNS ‘%@’ is invalid.";
 "macAlertMTUInvalid (%@)" = "MTU ‘%@’ is invalid.";
+"macAlertObfuscationInvalid (%@)" = "Obfuscation ‘%@’ is invalid.";
 
 "macAlertUnrecognizedInterfaceKey (%@)" = "Interface contains unrecognized key ‘%@’";
 "macAlertInfoUnrecognizedInterfaceKey" = "Valid keys are: ‘PrivateKey’, ‘ListenPort’, ‘Address’, ‘DNS’ and ‘MTU’.";

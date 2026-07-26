@@ -2,6 +2,7 @@
 // Copyright © 2018-2023 WireGuard LLC. All Rights Reserved.
 
 import Foundation
+import Network
 import NetworkExtension
 import os
 
@@ -12,6 +13,9 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             wg_log(logLevel.osLogLevel, message: message)
         }
     }()
+
+    // Non-nil only while an obfuscated tunnel is up.
+    private var obfuscationProxy: ObfuscationProxy?
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         let activationAttemptId = options?["activationAttemptId"] as? String
@@ -28,8 +32,20 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
+        // With obfuscation on, WireGuard talks to a loopback proxy that carries
+        // its datagrams over TCP; everything downstream sees an ordinary config.
+        let effectiveConfiguration: TunnelConfiguration
+        do {
+            effectiveConfiguration = try startObfuscationIfNeeded(for: tunnelConfiguration)
+        } catch {
+            wg_log(.error, message: "Starting obfuscation failed: \(error.localizedDescription)")
+            errorNotifier.notify(PacketTunnelProviderError.couldNotStartObfuscation)
+            completionHandler(PacketTunnelProviderError.couldNotStartObfuscation)
+            return
+        }
+
         // Start the tunnel
-        adapter.start(tunnelConfiguration: tunnelConfiguration) { adapterError in
+        adapter.start(tunnelConfiguration: effectiveConfiguration) { adapterError in
             guard let adapterError = adapterError else {
                 let interfaceName = self.adapter.interfaceName ?? "unknown"
 
@@ -69,8 +85,51 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    // Rewrites the peer endpoint to a local udp2tcp proxy when the config asks
+    // for obfuscation. Returns the configuration unchanged when it does not.
+    private func startObfuscationIfNeeded(for configuration: TunnelConfiguration) throws -> TunnelConfiguration {
+        guard let obfuscation = configuration.interface.obfuscation else { return configuration }
+        guard case .udp2tcp(let port) = obfuscation else { return configuration }
+
+        guard let endpoint = configuration.peers.first?.endpoint else {
+            wg_log(.error, staticMessage: "Obfuscation requires a peer with an Endpoint")
+            throw PacketTunnelProviderError.couldNotStartObfuscation
+        }
+        if configuration.peers.count > 1 {
+            wg_log(.error, staticMessage: "Obfuscation applies to the first peer only")
+        }
+        guard let remotePort = NWEndpoint.Port(rawValue: port) else {
+            throw PacketTunnelProviderError.couldNotStartObfuscation
+        }
+
+        let proxy = ObfuscationProxy(remoteHost: endpoint.host, remotePort: remotePort)
+        let localPort = try proxy.start()
+        obfuscationProxy = proxy
+
+        guard let loopbackPort = NWEndpoint.Port(rawValue: localPort) else {
+            proxy.stop()
+            obfuscationProxy = nil
+            throw PacketTunnelProviderError.couldNotStartObfuscation
+        }
+
+        var peers = configuration.peers
+        peers[0].endpoint = Endpoint(host: .ipv4(.loopback), port: loopbackPort)
+
+        // TCP resegments anyway, but a lower tunnel MTU keeps a single WireGuard
+        // datagram inside a single segment, which matters under loss.
+        var interface = configuration.interface
+        if interface.mtu == nil {
+            interface.mtu = 1280
+        }
+
+        return TunnelConfiguration(name: configuration.name, interface: interface, peers: peers)
+    }
+
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         wg_log(.info, staticMessage: "Stopping tunnel")
+
+        obfuscationProxy?.stop()
+        obfuscationProxy = nil
 
         adapter.stop { error in
             ErrorNotifier.removeLastErrorFile()
