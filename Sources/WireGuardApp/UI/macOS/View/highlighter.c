@@ -337,6 +337,18 @@ static bool is_valid_network(string_span_t s)
 	return is_valid_ipv4(s) || is_valid_ipv6(s);
 }
 
+/* Obfuscation = udp2tcp[:port] */
+static bool is_valid_obfuscation(string_span_t s)
+{
+	size_t colon;
+
+	for (colon = 0; colon < s.len && s.s[colon] != ':'; ++colon);
+	if (colon == s.len)
+		return is_caseless_same(s, "udp2tcp");
+	return is_caseless_same((string_span_t){ s.s, colon }, "udp2tcp") &&
+	       is_valid_port((string_span_t){ s.s + colon + 1, s.len - colon - 1 });
+}
+
 enum field {
 	InterfaceSection,
 	PrivateKey,
@@ -344,6 +356,9 @@ enum field {
 	Address,
 	DNS,
 	MTU,
+	/* Must stay between InterfaceSection and PeerSection: section_for_field
+	 * derives an attribute's section from its position in this enum. */
+	Obfuscation,
 #ifndef MOBILE_WGQUICK_SUBSET
 	FwMark,
 	Table,
@@ -378,6 +393,7 @@ static enum field get_field(string_span_t s)
 	check_enum(Address);
 	check_enum(DNS);
 	check_enum(MTU);
+	check_enum(Obfuscation);
 	check_enum(PublicKey);
 	check_enum(PresharedKey);
 	check_enum(AllowedIPs);
@@ -522,6 +538,23 @@ static void highlight_value(struct highlight_span_array *ret, const string_span_
 	case MTU:
 		append_highlight_span(ret, parent.s, s, is_valid_mtu(s) ? HighlightMTU : HighlightError);
 		break;
+	case Obfuscation: {
+		size_t colon;
+
+		if (!is_valid_obfuscation(s)) {
+			append_highlight_span(ret, parent.s, s, HighlightError);
+			break;
+		}
+		for (colon = 0; colon < s.len && s.s[colon] != ':'; ++colon);
+		if (colon == s.len) {
+			append_highlight_span(ret, parent.s, s, HighlightHost);
+			break;
+		}
+		append_highlight_span(ret, parent.s, (string_span_t){ s.s, colon }, HighlightHost);
+		append_highlight_span(ret, parent.s, (string_span_t){ s.s + colon, 1 }, HighlightDelimiter);
+		append_highlight_span(ret, parent.s, (string_span_t){ s.s + colon + 1, s.len - colon - 1 }, HighlightPort);
+		break;
+	}
 #ifndef MOBILE_WGQUICK_SUBSET
 	case SaveConfig:
 		append_highlight_span(ret, parent.s, s, is_valid_saveconfig(s) ? HighlightSaveConfig : HighlightError);
